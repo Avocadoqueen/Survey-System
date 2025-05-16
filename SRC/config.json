@@ -1,0 +1,23 @@
+{
+  "development": {
+    "username": "root",
+    "password": "yourpassword",
+    "database": "survey_db",
+    "host": "127.0.0.1",
+    "dialect": "mysql"
+  },
+  "test": {
+    "username": "root",
+    "password": "yourpassword",
+    "database": "survey_test_db",
+    "host": "127.0.0.1",
+    "dialect": "mysql"
+  },
+  "production": {
+    "username": "root",
+    "password": "yourpassword",
+    "database": "survey_prod_db",
+    "host": "127.0.0.1",
+    "dialect": "mysql"
+  }
+}

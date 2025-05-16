@@ -1,0 +1,15 @@
+export class HTTPException extends Error {
+  public status: number;
+  public message: string;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.message = message;
+
+    // Set the prototype explicitly (important for TypeScript)
+    Object.setPrototypeOf(this, HTTPException.prototype);
+  }
+  
+}
+
