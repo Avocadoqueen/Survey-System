@@ -116,5 +116,29 @@ router.post('/login', async (req, res) => {
     });
   }
 });
+// Get current user profile
+router.get('/me', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(' ')[1];
 
+    if (!token) {
+      return res.status(401).json({ message: 'Access token required' });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any;
+    const userId = decoded.userId;
+
+    const user = await UserModel.findByPk(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json({
+      user: { id: user.user_id, email: user.email, name: user.name, username: user.username }
+    });
+  } catch (error) {
+    res.status(401).json({ message: 'Invalid or expired token' });
+  }
+});
 export default router;
