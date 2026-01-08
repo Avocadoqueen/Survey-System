@@ -1,269 +1,242 @@
-"use client"
+'use client';
 
-import { Navigation } from "@/components/navigation"
-import { Footer } from "@/components/footer"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Label } from "@/components/ui/label"
-import { Progress } from "@/components/ui/progress"
-import { ArrowLeft, ArrowRight, CheckCircle } from "lucide-react"
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { surveysApi, responsesApi } from '@/lib/api';
+import { ToastContainer, useToast } from '@/components/Toast';
 
-// Mock survey data - in a real app, this would come from an API
-const mockSurvey = {
-  id: "1",
-  title: "Student Satisfaction Survey 2024",
-  description:
-    "Help us improve campus facilities and services by sharing your feedback about your university experience. Your responses are anonymous and will be used to enhance the quality of education and services at Near East University.",
-  creator: "Dr. Sarah Johnson",
-  questions: [
-    {
-      id: "1",
-      type: "multiple-choice" as const,
-      question: "How would you rate the overall quality of education at Near East University?",
-      required: true,
-      options: ["Excellent", "Very Good", "Good", "Fair", "Poor"],
-    },
-    {
-      id: "2",
-      type: "rating" as const,
-      question: "How satisfied are you with the campus facilities (library, labs, cafeteria, etc.)?",
-      required: true,
-    },
-    {
-      id: "3",
-      type: "multiple-choice" as const,
-      question: "Which campus facility do you use most frequently?",
-      required: false,
-      options: ["Library", "Computer Labs", "Cafeteria", "Sports Center", "Study Areas", "Other"],
-    },
-    {
-      id: "4",
-      type: "long-answer" as const,
-      question: "What improvements would you like to see on campus? Please provide specific suggestions.",
-      required: false,
-    },
-    {
-      id: "5",
-      type: "short-answer" as const,
-      question: "What is your major/field of study?",
-      required: true,
-    },
-  ],
+interface Question {
+  id: number;
+  question_text: string;
+  question_type: 'text' | 'multiple_choice' | 'rating';
+  options?: string[];
+  required: boolean;
 }
 
-export default function TakeSurveyPage({ params }: { params: { id: string } }) {
-  const router = useRouter()
-  const [currentQuestion, setCurrentQuestion] = useState(0)
-  const [answers, setAnswers] = useState<Record<string, string>>({})
-  const [isSubmitted, setIsSubmitted] = useState(false)
+interface Survey {
+  id: number;
+  title: string;
+  description: string;
+  questions: Question[];
+}
 
-  const survey = mockSurvey // In a real app, fetch based on params.id
-  const progress = ((currentQuestion + 1) / survey.questions.length) * 100
+export default function TakeSurveyPage() {
+  const params = useParams();
+  const router = useRouter();
+  const surveyId = params.id as string;
+  
+  const [survey, setSurvey] = useState<Survey | null>(null);
+  const [answers, setAnswers] = useState<Record<number, string | number>>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { toasts, addToast, removeToast } = useToast();
 
-  const handleAnswer = (questionId: string, answer: string) => {
-    setAnswers({ ...answers, [questionId]: answer })
-  }
+  useEffect(() => {
+    fetchSurvey();
+  }, [surveyId]);
 
-  const canProceed = () => {
-    const question = survey.questions[currentQuestion]
-    if (question.required) {
-      return answers[question.id]?.trim() !== "" && answers[question.id] !== undefined
+  const fetchSurvey = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const data = await surveysApi.getById(Number(surveyId));
+      setSurvey(data.survey || data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load survey';
+      setError(message);
+      addToast(message, 'error');
+    } finally {
+      setIsLoading(false);
     }
-    return true
-  }
+  };
 
-  const nextQuestion = () => {
-    if (currentQuestion < survey.questions.length - 1) {
-      setCurrentQuestion(currentQuestion + 1)
-    }
-  }
+  const handleAnswerChange = (questionId: number, value: string | number) => {
+    setAnswers((prev) => ({ ...prev, [questionId]: value }));
+  };
 
-  const prevQuestion = () => {
-    if (currentQuestion > 0) {
-      setCurrentQuestion(currentQuestion - 1)
-    }
-  }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
 
-  const submitSurvey = () => {
-    // Check if all required questions are answered
+    if (!survey) return;
+
+    // Validate required questions
     const unansweredRequired = survey.questions.filter(
-      (q) => q.required && (!answers[q.id] || answers[q.id].trim() === ""),
-    )
+      (q) => q.required && !answers[q.id]
+    );
 
     if (unansweredRequired.length > 0) {
-      alert("Please answer all required questions before submitting.")
-      return
+      addToast('Please answer all required questions', 'error');
+      return;
     }
 
-    // In a real app, this would submit to the backend
-    console.log("Submitting survey:", { surveyId: params.id, answers })
-    setIsSubmitted(true)
-  }
+    setIsSubmitting(true);
 
-  if (isSubmitted) {
+    try {
+      // Submit each answer as a response
+      const responsePromises = Object.entries(answers).map(([questionId, answer]) => {
+        return responsesApi.submit({
+          survey_id: survey.id,
+          question_id: Number(questionId),
+          answer_text: String(answer),
+        });
+      });
+
+      await Promise.all(responsePromises);
+      
+      addToast('Thank you for completing the survey!', 'success');
+      
+      setTimeout(() => {
+        router.push('/');
+      }, 2000);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to submit survey';
+      addToast(message, 'error');
+      setIsSubmitting(false);
+    }
+  };
+
+  if (isLoading) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <Navigation />
-        <main className="flex-1 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-          <Card className="w-full max-w-md text-center">
-            <CardContent className="pt-6">
-              <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold mb-2">Thank You!</h2>
-              <p className="text-muted-foreground mb-6">
-                Your response has been submitted successfully. We appreciate your participation in this survey.
-              </p>
-              <Button onClick={() => router.push("/dashboard")} className="w-full">
-                Return to Dashboard
-              </Button>
-            </CardContent>
-          </Card>
-        </main>
-        <Footer />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading survey...</p>
+        </div>
       </div>
-    )
+    );
   }
 
-  const question = survey.questions[currentQuestion]
+  if (error || !survey) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <p className="text-red-600 mb-4">{error || 'Survey not found'}</p>
+          <Link href="/" className="text-blue-600 hover:text-blue-700">
+            ← Back to Home
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <Navigation />
-
-      <main className="flex-1 py-8">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Survey Header */}
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-foreground mb-2">{survey.title}</h1>
-            <p className="text-muted-foreground">{survey.description}</p>
-            <p className="text-sm text-muted-foreground mt-2">Created by {survey.creator}</p>
-          </div>
-
-          {/* Progress */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-muted-foreground">
-                Question {currentQuestion + 1} of {survey.questions.length}
-              </span>
-              <span className="text-sm text-muted-foreground">{Math.round(progress)}% Complete</span>
-            </div>
-            <Progress value={progress} className="h-2" />
-          </div>
-
-          {/* Question Card */}
-          <Card className="mb-8">
-            <CardHeader>
-              <CardTitle className="text-xl flex items-center gap-2">
-                Question {currentQuestion + 1}
-                {question.required && <span className="text-destructive">*</span>}
-              </CardTitle>
-              <p className="text-foreground text-lg">{question.question}</p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {question.type === "multiple-choice" && (
-                <RadioGroup
-                  value={answers[question.id] || ""}
-                  onValueChange={(value) => handleAnswer(question.id, value)}
-                >
-                  {question.options?.map((option, index) => (
-                    <div key={index} className="flex items-center space-x-2">
-                      <RadioGroupItem value={option} id={`${question.id}-${index}`} />
-                      <Label htmlFor={`${question.id}-${index}`} className="text-base">
-                        {option}
-                      </Label>
-                    </div>
-                  ))}
-                </RadioGroup>
-              )}
-
-              {question.type === "short-answer" && (
-                <Input
-                  placeholder="Enter your answer..."
-                  value={answers[question.id] || ""}
-                  onChange={(e) => handleAnswer(question.id, e.target.value)}
-                  className="text-base"
-                />
-              )}
-
-              {question.type === "long-answer" && (
-                <Textarea
-                  placeholder="Enter your detailed answer..."
-                  value={answers[question.id] || ""}
-                  onChange={(e) => handleAnswer(question.id, e.target.value)}
-                  rows={6}
-                  className="text-base"
-                />
-              )}
-
-              {question.type === "rating" && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between text-sm text-muted-foreground">
-                    <span>Very Dissatisfied</span>
-                    <span>Very Satisfied</span>
-                  </div>
-                  <RadioGroup
-                    value={answers[question.id] || ""}
-                    onValueChange={(value) => handleAnswer(question.id, value)}
-                    className="flex justify-between"
-                  >
-                    {[1, 2, 3, 4, 5].map((rating) => (
-                      <div key={rating} className="flex flex-col items-center space-y-2">
-                        <RadioGroupItem value={rating.toString()} id={`${question.id}-${rating}`} />
-                        <Label htmlFor={`${question.id}-${rating}`} className="text-sm">
-                          {rating}
-                        </Label>
-                      </div>
-                    ))}
-                  </RadioGroup>
-                </div>
-              )}
-
-              {question.required && <p className="text-sm text-muted-foreground">* This question is required</p>}
-            </CardContent>
-          </Card>
-
-          {/* Navigation */}
-          <div className="flex justify-between items-center">
-            <Button
-              variant="outline"
-              onClick={prevQuestion}
-              disabled={currentQuestion === 0}
-              className="bg-transparent"
-            >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Previous
-            </Button>
-
-            <div className="flex gap-2">
-              {currentQuestion === survey.questions.length - 1 ? (
-                <Button onClick={submitSurvey} disabled={!canProceed()} size="lg">
-                  Submit Survey
-                </Button>
-              ) : (
-                <Button onClick={nextQuestion} disabled={!canProceed()}>
-                  Next
-                  <ArrowRight className="h-4 w-4 ml-2" />
-                </Button>
-              )}
-            </div>
-          </div>
-
-          {/* Skip option for non-required questions */}
-          {!question.required && !canProceed() && currentQuestion < survey.questions.length - 1 && (
-            <div className="text-center mt-4">
-              <Button variant="ghost" onClick={nextQuestion} className="text-muted-foreground">
-                Skip this question
-              </Button>
-            </div>
+    <div className="min-h-screen bg-gray-50 py-8">
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+      
+      <div className="max-w-2xl mx-auto px-4">
+        {/* Survey Header */}
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">{survey.title}</h1>
+          {survey.description && (
+            <p className="text-gray-600">{survey.description}</p>
           )}
         </div>
-      </main>
 
-      <Footer />
+        {/* Survey Form */}
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {survey.questions && survey.questions.length > 0 ? (
+            survey.questions.map((question, index) => (
+              <div key={question.id} className="bg-white rounded-lg shadow p-6">
+                <div className="mb-4">
+                  <span className="text-sm text-gray-500">Question {index + 1}</span>
+                  <h3 className="text-lg font-medium text-gray-900">
+                    {question.question_text}
+                    {question.required && <span className="text-red-500 ml-1">*</span>}
+                  </h3>
+                </div>
+
+                {question.question_type === 'text' && (
+                  <textarea
+                    value={(answers[question.id] as string) || ''}
+                    onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter your answer"
+                    disabled={isSubmitting}
+                  />
+                )}
+
+                {question.question_type === 'multiple_choice' && question.options && (
+                  <div className="space-y-2">
+                    {question.options.map((option, optionIndex) => (
+                      <label
+                        key={optionIndex}
+                        className="flex items-center gap-3 p-3 border border-gray-200 rounded-md hover:bg-gray-50 cursor-pointer"
+                      >
+                        <input
+                          type="radio"
+                          name={`question-${question.id}`}
+                          value={option}
+                          checked={answers[question.id] === option}
+                          onChange={() => handleAnswerChange(question.id, option)}
+                          className="text-blue-600"
+                          disabled={isSubmitting}
+                        />
+                        <span className="text-gray-700">{option}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                {question.question_type === 'rating' && (
+                  <div className="flex gap-2">
+                    {[1, 2, 3, 4, 5].map((rating) => (
+                      <button
+                        key={rating}
+                        type="button"
+                        onClick={() => handleAnswerChange(question.id, rating)}
+                        className={`w-12 h-12 rounded-full border-2 font-medium transition-colors ${
+                          answers[question.id] === rating
+                            ? 'bg-blue-600 border-blue-600 text-white'
+                            : 'border-gray-300 text-gray-700 hover:border-blue-400'
+                        }`}
+                        disabled={isSubmitting}
+                      >
+                        {rating}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))
+          ) : (
+            <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
+              This survey has no questions yet.
+            </div>
+          )}
+
+          {/* Submit Button */}
+          {survey.questions && survey.questions.length > 0 && (
+            <div className="flex justify-end gap-4">
+              <Link
+                href="/"
+                className="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </Link>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isSubmitting ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Submitting...
+                  </>
+                ) : (
+                  'Submit Survey'
+                )}
+              </button>
+            </div>
+          )}
+        </form>
+      </div>
     </div>
-  )
+  );
 }

@@ -1,325 +1,305 @@
-"use client"
+'use client';
 
-import { Navigation } from "@/components/navigation"
-import { Footer } from "@/components/footer"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Progress } from "@/components/ui/progress"
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts"
-import { Download, Users, Calendar, TrendingUp, FileText, Share2 } from "lucide-react"
-import Link from "next/link"
+import { useState, useEffect } from 'react';
+import { useParams } from 'next/navigation';
+import Link from 'next/link';
+import ProtectedRoute from '@/components/ProtectedRoute';
+import { surveysApi, responsesApi } from '@/lib/api';
+import { ToastContainer, useToast } from '@/components/Toast';
 
-// Mock survey results data
-const mockSurveyResults = {
-  id: "1",
-  title: "Student Satisfaction Survey 2024",
-  description: "Help us improve campus facilities and services by sharing your feedback.",
-  creator: "Dr. Sarah Johnson",
-  status: "active",
-  createdAt: "2024-01-15",
-  totalResponses: 245,
-  questions: [
-    {
-      id: "1",
-      type: "multiple-choice",
-      question: "How would you rate the overall quality of education at Near East University?",
-      responses: [
-        { option: "Excellent", count: 89, percentage: 36.3 },
-        { option: "Very Good", count: 98, percentage: 40.0 },
-        { option: "Good", count: 45, percentage: 18.4 },
-        { option: "Fair", count: 10, percentage: 4.1 },
-        { option: "Poor", count: 3, percentage: 1.2 },
-      ],
-    },
-    {
-      id: "2",
-      type: "rating",
-      question: "How satisfied are you with the campus facilities?",
-      averageRating: 4.2,
-      responses: [
-        { rating: "1", count: 5, percentage: 2.0 },
-        { rating: "2", count: 12, percentage: 4.9 },
-        { rating: "3", count: 34, percentage: 13.9 },
-        { rating: "4", count: 98, percentage: 40.0 },
-        { rating: "5", count: 96, percentage: 39.2 },
-      ],
-    },
-    {
-      id: "3",
-      type: "multiple-choice",
-      question: "Which campus facility do you use most frequently?",
-      responses: [
-        { option: "Library", count: 89, percentage: 36.3 },
-        { option: "Computer Labs", count: 67, percentage: 27.3 },
-        { option: "Cafeteria", count: 45, percentage: 18.4 },
-        { option: "Sports Center", count: 23, percentage: 9.4 },
-        { option: "Study Areas", count: 15, percentage: 6.1 },
-        { option: "Other", count: 6, percentage: 2.4 },
-      ],
-    },
-  ],
-  textResponses: [
-    {
-      id: "4",
-      question: "What improvements would you like to see on campus?",
-      responses: [
-        "More study spaces in the library",
-        "Better Wi-Fi connectivity across campus",
-        "Extended cafeteria hours",
-        "More parking spaces",
-        "Updated computer lab equipment",
-        // ... more responses
-      ],
-    },
-  ],
+interface Question {
+  id: number;
+  question_text: string;
+  question_type: 'text' | 'multiple_choice' | 'rating';
+  options?: string[];
 }
 
-const COLORS = ["#9B1B30", "#C53030", "#E53E3E", "#FC8181", "#FEB2B2", "#FED7D7"]
+interface Survey {
+  id: number;
+  title: string;
+  description: string;
+  questions: Question[];
+}
 
-export default function SurveyResultsPage({ params }: { params: { id: string } }) {
-  const survey = mockSurveyResults
+interface Response {
+  id: number;
+  question_id: number;
+  answer_text: string;
+  created_at: string;
+}
 
-  const exportResults = (format: "csv" | "pdf") => {
-    // In a real app, this would generate and download the file
-    alert(`Exporting results as ${format.toUpperCase()}...`)
+interface QuestionAnalytics {
+  questionId: number;
+  questionText: string;
+  questionType: string;
+  totalResponses: number;
+  answers: Array<{
+    answer: string;
+    count: number;
+    percentage: number;
+  }>;
+  averageRating?: number;
+}
+
+function ResultsContent() {
+  const params = useParams();
+  const surveyId = params.id as string;
+  
+  const [survey, setSurvey] = useState<Survey | null>(null);
+  const [responses, setResponses] = useState<Response[]>([]);
+  const [analytics, setAnalytics] = useState<QuestionAnalytics[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { toasts, addToast, removeToast } = useToast();
+
+  useEffect(() => {
+    fetchData();
+  }, [surveyId]);
+
+  const fetchData = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      // Fetch survey details
+      const surveyData = await surveysApi.getById(Number(surveyId));
+      const surveyInfo = surveyData.survey || surveyData;
+      setSurvey(surveyInfo);
+
+      // Fetch responses
+      const responsesData = await responsesApi.getBySurvey(Number(surveyId));
+      const responsesList = responsesData.responses || responsesData || [];
+      setResponses(responsesList);
+
+      // Calculate analytics
+      if (surveyInfo.questions && responsesList.length > 0) {
+        const analyticsData = calculateAnalytics(surveyInfo.questions, responsesList);
+        setAnalytics(analyticsData);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load results';
+      setError(message);
+      addToast(message, 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const calculateAnalytics = (questions: Question[], responses: Response[]): QuestionAnalytics[] => {
+    return questions.map((question) => {
+      const questionResponses = responses.filter((r) => r.question_id === question.id);
+      const totalResponses = questionResponses.length;
+
+      // Count answers
+      const answerCounts: Record<string, number> = {};
+      questionResponses.forEach((r) => {
+        const answer = r.answer_text;
+        answerCounts[answer] = (answerCounts[answer] || 0) + 1;
+      });
+
+      const answers = Object.entries(answerCounts).map(([answer, count]) => ({
+        answer,
+        count,
+        percentage: totalResponses > 0 ? Math.round((count / totalResponses) * 100) : 0,
+      }));
+
+      // Calculate average for rating questions
+      let averageRating: number | undefined;
+      if (question.question_type === 'rating' && totalResponses > 0) {
+        const sum = questionResponses.reduce((acc, r) => acc + Number(r.answer_text), 0);
+        averageRating = Math.round((sum / totalResponses) * 10) / 10;
+      }
+
+      return {
+        questionId: question.id,
+        questionText: question.question_text,
+        questionType: question.question_type,
+        totalResponses,
+        answers: answers.sort((a, b) => b.count - a.count),
+        averageRating,
+      };
+    });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading results...</p>
+        </div>
+      </div>
+    );
   }
 
-  return (
-    <div className="min-h-screen flex flex-col">
-      <Navigation />
+  if (error || !survey) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <p className="text-red-600 mb-4">{error || 'Survey not found'}</p>
+          <Link href="/dashboard" className="text-blue-600 hover:text-blue-700">
+            ← Back to Dashboard
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
-      <main className="flex-1 py-8">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Header */}
-          <div className="mb-8">
-            <div className="flex items-start justify-between">
-              <div>
-                <h1 className="text-3xl font-bold text-foreground mb-2">{survey.title}</h1>
-                <p className="text-muted-foreground mb-4">{survey.description}</p>
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Users className="h-4 w-4" />
-                    {survey.totalResponses} responses
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Calendar className="h-4 w-4" />
-                    Created {survey.createdAt}
-                  </span>
-                  <Badge variant="secondary" className="bg-green-100 text-green-800">
-                    {survey.status}
-                  </Badge>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" className="bg-transparent">
-                  <Share2 className="h-4 w-4 mr-2" />
-                  <Link href={`/surveys/${params.id}/qr`}>Share</Link>
-                </Button>
-                <Button variant="outline" onClick={() => exportResults("csv")} className="bg-transparent">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export CSV
-                </Button>
-                <Button variant="outline" onClick={() => exportResults("pdf")} className="bg-transparent">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export PDF
-                </Button>
-              </div>
+  const totalUniqueResponses = new Set(responses.map(r => r.created_at.split('T')[0] + r.question_id)).size;
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+      
+      {/* Header */}
+      <header className="bg-white shadow">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{survey.title}</h1>
+            <p className="text-gray-600">Survey Results</p>
+          </div>
+          <Link href="/dashboard" className="text-gray-600 hover:text-gray-900">
+            ← Back to Dashboard
+          </Link>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Summary Card */}
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Summary</h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="text-center p-4 bg-blue-50 rounded-lg">
+              <p className="text-3xl font-bold text-blue-600">{responses.length}</p>
+              <p className="text-sm text-gray-600">Total Responses</p>
+            </div>
+            <div className="text-center p-4 bg-green-50 rounded-lg">
+              <p className="text-3xl font-bold text-green-600">
+                {survey.questions?.length || 0}
+              </p>
+              <p className="text-sm text-gray-600">Questions</p>
+            </div>
+            <div className="text-center p-4 bg-purple-50 rounded-lg">
+              <p className="text-3xl font-bold text-purple-600">
+                {analytics.filter(a => a.totalResponses > 0).length}
+              </p>
+              <p className="text-sm text-gray-600">Questions Answered</p>
             </div>
           </div>
+        </div>
 
-          {/* Summary Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Responses</CardTitle>
-                <Users className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{survey.totalResponses}</div>
-                <p className="text-xs text-muted-foreground">+12% from last week</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Completion Rate</CardTitle>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">87%</div>
-                <p className="text-xs text-muted-foreground">Above average</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Avg. Time</CardTitle>
-                <Calendar className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">3.2m</div>
-                <p className="text-xs text-muted-foreground">Per response</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Response Rate</CardTitle>
-                <FileText className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">68%</div>
-                <p className="text-xs text-muted-foreground">Of invited participants</p>
-              </CardContent>
-            </Card>
+        {/* Question Analytics */}
+        {analytics.length === 0 ? (
+          <div className="bg-white rounded-lg shadow p-6 text-center">
+            <p className="text-gray-500">No responses yet for this survey.</p>
+            <Link
+              href={`/surveys/${surveyId}/take`}
+              className="text-blue-600 hover:text-blue-700 mt-2 inline-block"
+            >
+              Be the first to respond →
+            </Link>
           </div>
+        ) : (
+          <div className="space-y-6">
+            {analytics.map((questionAnalytics, index) => (
+              <div key={questionAnalytics.questionId} className="bg-white rounded-lg shadow p-6">
+                <div className="mb-4">
+                  <span className="text-sm text-gray-500">Question {index + 1}</span>
+                  <h3 className="text-lg font-medium text-gray-900">
+                    {questionAnalytics.questionText}
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    {questionAnalytics.totalResponses} response{questionAnalytics.totalResponses !== 1 ? 's' : ''}
+                  </p>
+                </div>
 
-          {/* Results Tabs */}
-          <Tabs defaultValue="overview" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="detailed">Detailed Results</TabsTrigger>
-              <TabsTrigger value="responses">Text Responses</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="overview" className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Question 1 - Bar Chart */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg">Education Quality Rating</CardTitle>
-                    <CardDescription>{survey.questions[0].question}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={survey.questions[0].responses}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="option" />
-                        <YAxis />
-                        <Tooltip />
-                        <Bar dataKey="count" fill="#9B1B30" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-
-                {/* Question 3 - Pie Chart */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg">Most Used Facilities</CardTitle>
-                    <CardDescription>{survey.questions[2].question}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie
-                          data={survey.questions[2].responses}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={({ payload }) => `${payload.option} (${payload.percentage}%)`}
-                          outerRadius={80}
-                          fill="#8884d8"
-                          dataKey="count"
-                        >
-                          {survey.questions[2].responses.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Rating Question */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Campus Facilities Satisfaction</CardTitle>
-                  <CardDescription>{survey.questions[1].question}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-2xl font-bold">{survey.questions[1].averageRating}/5</span>
-                      <span className="text-muted-foreground">Average Rating</span>
-                    </div>
-                    <div className="space-y-2">
-                      {survey.questions[1].responses.map((response, index) => (
-                        <div key={index} className="flex items-center gap-4">
-                          <span className="w-8 text-sm">{'rating' in response ? response.rating : ''} ⭐</span>
-                          <Progress value={response.percentage} className="flex-1" />
-                          <span className="text-sm text-muted-foreground w-16">
-                            {response.count} ({response.percentage}%)
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="detailed" className="space-y-6">
-              {survey.questions.map((question, index) => (
-                <Card key={question.id}>
-                  <CardHeader>
-                    <CardTitle>Question {index + 1}</CardTitle>
-                    <CardDescription>{question.question}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {question.responses.map((response, responseIndex) => (
-                        <div
-                          key={responseIndex}
-                          className="flex items-center justify-between p-3 bg-muted/30 rounded-lg"
-                        >
-                          <span className="font-medium">
-                            {question.type === "rating"
-                              ? `${'rating' in response ? response.rating : ''} Star${'rating' in response && response.rating !== "1" ? "s" : ""}`
-                              : 'option' in response ? response.option : ''}
-                          </span>
-                          <div className="flex items-center gap-4">
-                            <Progress value={response.percentage} className="w-24" />
-                            <span className="text-sm text-muted-foreground w-20">
-                              {response.count} ({response.percentage}%)
+                {questionAnalytics.totalResponses === 0 ? (
+                  <p className="text-gray-500 italic">No responses yet</p>
+                ) : (
+                  <>
+                    {/* Rating Average */}
+                    {questionAnalytics.questionType === 'rating' && questionAnalytics.averageRating && (
+                      <div className="mb-4 p-4 bg-yellow-50 rounded-lg">
+                        <p className="text-sm text-gray-600">Average Rating</p>
+                        <p className="text-3xl font-bold text-yellow-600">
+                          {questionAnalytics.averageRating} / 5
+                        </p>
+                        <div className="flex gap-1 mt-2">
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <span
+                              key={star}
+                              className={`text-2xl ${
+                                star <= Math.round(questionAnalytics.averageRating!)
+                                  ? 'text-yellow-400'
+                                  : 'text-gray-300'
+                              }`}
+                            >
+                              ★
                             </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Answer Distribution */}
+                    <div className="space-y-3">
+                      {questionAnalytics.answers.map((answer, answerIndex) => (
+                        <div key={answerIndex}>
+                          <div className="flex justify-between text-sm mb-1">
+                            <span className="text-gray-700 truncate max-w-[70%]">
+                              {answer.answer}
+                            </span>
+                            <span className="text-gray-500">
+                              {answer.count} ({answer.percentage}%)
+                            </span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div
+                              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                              style={{ width: `${answer.percentage}%` }}
+                            />
                           </div>
                         </div>
                       ))}
                     </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </TabsContent>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
-            <TabsContent value="responses" className="space-y-6">
-              {survey.textResponses.map((textQuestion) => (
-                <Card key={textQuestion.id}>
-                  <CardHeader>
-                    <CardTitle>{textQuestion.question}</CardTitle>
-                    <CardDescription>{textQuestion.responses.length} responses</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4 max-h-96 overflow-y-auto">
-                      {textQuestion.responses.map((response, index) => (
-                        <div key={index} className="p-3 bg-muted/30 rounded-lg">
-                          <p className="text-sm">{response}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </TabsContent>
-          </Tabs>
+        {/* Share Link */}
+        <div className="mt-8 bg-white rounded-lg shadow p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Share Survey</h2>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              readOnly
+              value={typeof window !== 'undefined' ? `${window.location.origin}/surveys/${surveyId}/take` : ''}
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-600"
+            />
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(`${window.location.origin}/surveys/${surveyId}/take`);
+                addToast('Link copied to clipboard!', 'success');
+              }}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+            >
+              Copy Link
+            </button>
+          </div>
         </div>
       </main>
-
-      <Footer />
     </div>
-  )
+  );
+}
+
+export default function ResultsPage() {
+  return (
+    <ProtectedRoute>
+      <ResultsContent />
+    </ProtectedRoute>
+  );
 }

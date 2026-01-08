@@ -1,288 +1,340 @@
-"use client"
+'use client';
 
-import { Navigation } from "@/components/navigation"
-import { Footer } from "@/components/footer"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { QuestionBuilder, type Question } from "@/components/question-builder"
-import { SurveyPreview } from "@/components/survey-preview"
-import { SurveyTemplates, type SurveyTemplate } from "@/components/survey-templates"
-import { Plus, Save, Eye, CopySlash as Publish, Palette, Wand2 } from "lucide-react"
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import ProtectedRoute from '@/components/ProtectedRoute';
+import { surveysApi } from '@/lib/api';
+import { ToastContainer, useToast } from '@/components/Toast';
 
-export default function CreateSurveyPage() {
-  const router = useRouter()
-  const [title, setTitle] = useState("")
-  const [description, setDescription] = useState("")
-  const [questions, setQuestions] = useState<Question[]>([])
-  const [activeTab, setActiveTab] = useState("templates")
-  const [selectedTemplate, setSelectedTemplate] = useState<SurveyTemplate | null>(null)
+interface Question {
+  id: string;
+  text: string;
+  type: 'text' | 'multiple_choice' | 'rating';
+  options?: string[];
+  required: boolean;
+}
 
-  const handleTemplateSelect = (template: SurveyTemplate) => {
-    setSelectedTemplate(template)
-    setTitle(template.name)
-    setDescription(template.description)
+function CreateSurveyContent() {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const router = useRouter();
+  const { toasts, addToast, removeToast } = useToast();
 
-    // Add template questions based on template type
-    if (template.id !== "custom-blank") {
-      const templateQuestions = generateTemplateQuestions(template)
-      setQuestions(templateQuestions)
-    }
-
-    setActiveTab("builder")
-  }
-
-  const generateTemplateQuestions = (template: SurveyTemplate): Question[] => {
-    const baseQuestions: Question[] = []
-
-    switch (template.id) {
-      case "student-satisfaction":
-        return [
-          {
-            id: "1",
-            type: "rating",
-            question: "How satisfied are you with the overall quality of education?",
-            required: true,
-            theme: "modern",
-          },
-          {
-            id: "2",
-            type: "multiple-choice",
-            question: "Which campus facilities do you use most frequently?",
-            required: true,
-            options: ["Library", "Cafeteria", "Sports Center", "Computer Labs", "Study Areas"],
-            theme: "modern",
-          },
-          {
-            id: "3",
-            type: "long-answer",
-            question: "What improvements would you suggest for campus services?",
-            required: false,
-            theme: "modern",
-          },
-        ]
-
-      case "course-evaluation":
-        return [
-          {
-            id: "1",
-            type: "rating",
-            question: "How clear were the course objectives?",
-            required: true,
-            theme: "minimal",
-          },
-          {
-            id: "2",
-            type: "rating",
-            question: "Rate the instructor's teaching effectiveness",
-            required: true,
-            theme: "minimal",
-          },
-          {
-            id: "3",
-            type: "yes-no",
-            question: "Was the workload appropriate for this course?",
-            required: true,
-            theme: "minimal",
-          },
-        ]
-
-      default:
-        return []
-    }
-  }
-
-  const addQuestion = () => {
+  const addQuestion = (type: Question['type']) => {
     const newQuestion: Question = {
-      id: Date.now().toString(),
-      type: "multiple-choice",
-      question: "",
+      id: Math.random().toString(36).substring(7),
+      text: '',
+      type,
+      options: type === 'multiple_choice' ? ['Option 1', 'Option 2'] : undefined,
       required: false,
-      options: [""],
-      theme: "default",
-    }
-    setQuestions([...questions, newQuestion])
-  }
+    };
+    setQuestions([...questions, newQuestion]);
+  };
 
-  const updateQuestion = (index: number, updatedQuestion: Question) => {
-    const newQuestions = [...questions]
-    newQuestions[index] = updatedQuestion
-    setQuestions(newQuestions)
-  }
+  const updateQuestion = (id: string, updates: Partial<Question>) => {
+    setQuestions(
+      questions.map((q) => (q.id === id ? { ...q, ...updates } : q))
+    );
+  };
 
-  const deleteQuestion = (index: number) => {
-    setQuestions(questions.filter((_, i) => i !== index))
-  }
+  const removeQuestion = (id: string) => {
+    setQuestions(questions.filter((q) => q.id !== id));
+  };
 
-  const saveDraft = () => {
-    // In a real app, this would save to the backend
-    console.log("Saving draft:", { title, description, questions })
-    alert("Survey saved as draft!")
-  }
+  const addOption = (questionId: string) => {
+    setQuestions(
+      questions.map((q) => {
+        if (q.id === questionId && q.options) {
+          return { ...q, options: [...q.options, `Option ${q.options.length + 1}`] };
+        }
+        return q;
+      })
+    );
+  };
 
-  const publishSurvey = () => {
+  const updateOption = (questionId: string, optionIndex: number, value: string) => {
+    setQuestions(
+      questions.map((q) => {
+        if (q.id === questionId && q.options) {
+          const newOptions = [...q.options];
+          newOptions[optionIndex] = value;
+          return { ...q, options: newOptions };
+        }
+        return q;
+      })
+    );
+  };
+
+  const removeOption = (questionId: string, optionIndex: number) => {
+    setQuestions(
+      questions.map((q) => {
+        if (q.id === questionId && q.options && q.options.length > 2) {
+          return { ...q, options: q.options.filter((_, i) => i !== optionIndex) };
+        }
+        return q;
+      })
+    );
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
     if (!title.trim()) {
-      alert("Please enter a survey title")
-      return
-    }
-    if (questions.length === 0) {
-      alert("Please add at least one question")
-      return
+      addToast('Please enter a survey title', 'error');
+      return;
     }
 
-    // In a real app, this would publish to the backend
-    console.log("Publishing survey:", { title, description, questions })
-    alert("Survey published successfully!")
-    router.push("/dashboard")
-  }
+    if (questions.length === 0) {
+      addToast('Please add at least one question', 'error');
+      return;
+    }
+
+    const emptyQuestions = questions.filter((q) => !q.text.trim());
+    if (emptyQuestions.length > 0) {
+      addToast('Please fill in all question texts', 'error');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      // Create the survey
+      const surveyData = await surveysApi.create({
+        title: title.trim(),
+        description: description.trim(),
+      });
+
+      const surveyId = surveyData.survey?.id || surveyData.id;
+
+      // Create questions for the survey
+      for (const question of questions) {
+        await surveysApi.addQuestion(surveyId, {
+          question_text: question.text,
+          question_type: question.type,
+          options: question.options,
+          required: question.required,
+        });
+      }
+
+      addToast('Survey created successfully!', 'success');
+      
+      // Small delay to show success message
+      setTimeout(() => {
+        router.push('/dashboard');
+      }, 1000);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create survey';
+      addToast(message, 'error');
+      setIsSubmitting(false);
+    }
+  };
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <Navigation />
+    <div className="min-h-screen bg-gray-50">
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+      
+      {/* Header */}
+      <header className="bg-white shadow">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-gray-900">Create New Survey</h1>
+          <Link href="/dashboard" className="text-gray-600 hover:text-gray-900">
+            ← Back to Dashboard
+          </Link>
+        </div>
+      </header>
 
-      <main className="flex-1 py-8">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-foreground mb-2">Create Survey</h1>
-            <p className="text-muted-foreground">
-              Build your survey by choosing a template or starting from scratch with advanced design options.
-            </p>
+      {/* Main Content */}
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <form onSubmit={handleSubmit} className="space-y-8">
+          {/* Survey Details */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Survey Details</h2>
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
+                  Title *
+                </label>
+                <input
+                  type="text"
+                  id="title"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter survey title"
+                  disabled={isSubmitting}
+                />
+              </div>
+              <div>
+                <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
+                  Description
+                </label>
+                <textarea
+                  id="description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter survey description (optional)"
+                  disabled={isSubmitting}
+                />
+              </div>
+            </div>
           </div>
 
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="templates">
-                <Wand2 className="h-4 w-4 mr-2" />
-                Templates
-              </TabsTrigger>
-              <TabsTrigger value="builder">
-                <Palette className="h-4 w-4 mr-2" />
-                Survey Builder
-              </TabsTrigger>
-              <TabsTrigger value="preview">
-                <Eye className="h-4 w-4 mr-2" />
-                Preview
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="templates" className="space-y-6">
-              <SurveyTemplates onSelectTemplate={handleTemplateSelect} />
-            </TabsContent>
-
-            <TabsContent value="builder" className="space-y-6">
-              {/* Survey Details */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Survey Details</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="title">Survey Title</Label>
-                    <Input
-                      id="title"
-                      placeholder="Enter survey title..."
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
+          {/* Questions */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Questions</h2>
+            
+            {questions.length === 0 ? (
+              <p className="text-gray-500 text-center py-4">
+                No questions added yet. Add your first question below.
+              </p>
+            ) : (
+              <div className="space-y-6">
+                {questions.map((question, index) => (
+                  <div key={question.id} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex justify-between items-start mb-3">
+                      <span className="text-sm font-medium text-gray-500">
+                        Question {index + 1} ({question.type.replace('_', ' ')})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeQuestion(question.id)}
+                        className="text-red-600 hover:text-red-700 text-sm"
+                        disabled={isSubmitting}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    
+                    <input
+                      type="text"
+                      value={question.text}
+                      onChange={(e) => updateQuestion(question.id, { text: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
+                      placeholder="Enter question text"
+                      disabled={isSubmitting}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="description">Description</Label>
-                    <Textarea
-                      id="description"
-                      placeholder="Describe what this survey is about..."
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      rows={3}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
 
-              {/* Questions */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-semibold">Questions</h2>
-                  <Button onClick={addQuestion}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Question
-                  </Button>
-                </div>
-
-                {questions.length === 0 ? (
-                  <Card>
-                    <CardContent className="flex flex-col items-center justify-center py-12">
-                      <div className="text-center">
-                        <h3 className="text-lg font-semibold mb-2">No questions yet</h3>
-                        <p className="text-muted-foreground mb-4">
-                          Start building your survey by adding your first question or selecting a template.
-                        </p>
-                        <Button onClick={addQuestion}>
-                          <Plus className="h-4 w-4 mr-2" />
-                          Add First Question
-                        </Button>
+                    {question.type === 'multiple_choice' && question.options && (
+                      <div className="space-y-2 ml-4">
+                        {question.options.map((option, optionIndex) => (
+                          <div key={optionIndex} className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={option}
+                              onChange={(e) => updateOption(question.id, optionIndex, e.target.value)}
+                              className="flex-1 px-3 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                              disabled={isSubmitting}
+                            />
+                            {question.options && question.options.length > 2 && (
+                              <button
+                                type="button"
+                                onClick={() => removeOption(question.id, optionIndex)}
+                                className="text-red-600 hover:text-red-700 text-sm"
+                                disabled={isSubmitting}
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => addOption(question.id)}
+                          className="text-blue-600 hover:text-blue-700 text-sm"
+                          disabled={isSubmitting}
+                        >
+                          + Add Option
+                        </button>
                       </div>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <div className="space-y-4">
-                    {questions.map((question, index) => (
-                      <QuestionBuilder
-                        key={question.id}
-                        question={question}
-                        onUpdate={(updatedQuestion) => updateQuestion(index, updatedQuestion)}
-                        onDelete={() => deleteQuestion(index)}
-                        index={index}
-                      />
-                    ))}
+                    )}
+
+                    <div className="mt-3">
+                      <label className="flex items-center gap-2 text-sm text-gray-600">
+                        <input
+                          type="checkbox"
+                          checked={question.required}
+                          onChange={(e) => updateQuestion(question.id, { required: e.target.checked })}
+                          className="rounded border-gray-300"
+                          disabled={isSubmitting}
+                        />
+                        Required question
+                      </label>
+                    </div>
                   </div>
-                )}
+                ))}
               </div>
+            )}
 
-              {/* Actions */}
-              <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t">
-                <Button variant="outline" onClick={saveDraft} className="flex-1 bg-transparent">
-                  <Save className="h-4 w-4 mr-2" />
-                  Save Draft
-                </Button>
-                <Button variant="outline" onClick={() => setActiveTab("preview")} className="flex-1">
-                  <Eye className="h-4 w-4 mr-2" />
-                  Preview Survey
-                </Button>
-                <Button onClick={publishSurvey} className="flex-1">
-                  <Publish className="h-4 w-4 mr-2" />
-                  Publish Survey
-                </Button>
-              </div>
-            </TabsContent>
+            {/* Add Question Buttons */}
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => addQuestion('text')}
+                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-colors"
+                disabled={isSubmitting}
+              >
+                + Text Question
+              </button>
+              <button
+                type="button"
+                onClick={() => addQuestion('multiple_choice')}
+                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-colors"
+                disabled={isSubmitting}
+              >
+                + Multiple Choice
+              </button>
+              <button
+                type="button"
+                onClick={() => addQuestion('rating')}
+                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-colors"
+                disabled={isSubmitting}
+              >
+                + Rating (1-5)
+              </button>
+            </div>
+          </div>
 
-            <TabsContent value="preview" className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold">Survey Preview</h2>
-                <Button variant="outline" onClick={() => setActiveTab("builder")}>
-                  Back to Builder
-                </Button>
-              </div>
-
-              <SurveyPreview title={title} description={description} questions={questions} />
-
-              <div className="flex justify-center pt-6 border-t">
-                <Button onClick={publishSurvey} size="lg">
-                  <Publish className="h-4 w-4 mr-2" />
-                  Publish Survey
-                </Button>
-              </div>
-            </TabsContent>
-          </Tabs>
-        </div>
+          {/* Submit Button */}
+          <div className="flex justify-end gap-4">
+            <Link
+              href="/dashboard"
+              className="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </Link>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {isSubmitting ? (
+                <>
+                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Creating...
+                </>
+              ) : (
+                'Create Survey'
+              )}
+            </button>
+          </div>
+        </form>
       </main>
-
-      <Footer />
     </div>
-  )
+  );
+}
+
+export default function CreateSurveyPage() {
+  return (
+    <ProtectedRoute>
+      <CreateSurveyContent />
+    </ProtectedRoute>
+  );
 }

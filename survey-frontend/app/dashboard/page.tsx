@@ -1,237 +1,154 @@
-"use client"
+'use client';
 
-import { Navigation } from "@/components/navigation"
-import { Footer } from "@/components/footer"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { SurveyCard } from "@/components/survey-card"
-import { Search, Plus, BarChart3, Users, FileText } from "lucide-react"
-import Link from "next/link"
-import { useState } from "react"
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useAuth } from '@/contexts/AuthContext';
+import ProtectedRoute from '@/components/ProtectedRoute';
+import { surveysApi } from '@/lib/api';
+import { ToastContainer, useToast } from '@/components/Toast';
 
-// Mock data - in a real app, this would come from an API
-const mockSurveys = [
-  {
-    id: "1",
-    title: "Student Satisfaction Survey 2024",
-    description:
-      "Help us improve campus facilities and services by sharing your feedback about your university experience.",
-    creator: "Dr. Sarah Johnson",
-    responses: 245,
-    status: "active" as const,
-    createdAt: "2024-01-15",
-    isOwner: false,
-  },
-  {
-    id: "2",
-    title: "Course Evaluation - Computer Science",
-    description: "Evaluate the quality of teaching and course content for the Computer Science program.",
-    creator: "Prof. Michael Chen",
-    responses: 89,
-    status: "active" as const,
-    createdAt: "2024-01-20",
-    isOwner: false,
-  },
-  {
-    id: "3",
-    title: "Campus Dining Preferences",
-    description: "Share your thoughts on campus dining options and help us plan new menu items.",
-    creator: "Campus Services",
-    responses: 156,
-    status: "active" as const,
-    createdAt: "2024-01-18",
-    isOwner: false,
-  },
-]
+interface Survey {
+  id: number;
+  title: string;
+  description: string;
+  created_at: string;
+  response_count?: number;
+}
 
-const mockMySurveys = [
-  {
-    id: "4",
-    title: "Research Study on Learning Methods",
-    description:
-      "A comprehensive study on different learning methodologies and their effectiveness among university students.",
-    creator: "You",
-    responses: 67,
-    status: "active" as const,
-    createdAt: "2024-01-10",
-    isOwner: true,
-  },
-  {
-    id: "5",
-    title: "Library Usage Survey",
-    description: "Understanding how students use library resources and what improvements they would like to see.",
-    creator: "You",
-    responses: 23,
-    status: "draft" as const,
-    createdAt: "2024-01-22",
-    isOwner: true,
-  },
-]
+function DashboardContent() {
+  const [surveys, setSurveys] = useState<Survey[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const { user, logout } = useAuth();
+  const { toasts, addToast, removeToast } = useToast();
 
-export default function DashboardPage() {
-  const [searchTerm, setSearchTerm] = useState("")
+  useEffect(() => {
+    fetchSurveys();
+  }, []);
 
-  const filteredSurveys = mockSurveys.filter(
-    (survey) =>
-      survey.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      survey.creator.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
+  const fetchSurveys = async () => {
+    try {
+      setIsLoading(true);
+      const data = await surveysApi.getAll();
+      setSurveys(data.surveys || data || []);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load surveys';
+      addToast(message, 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-  const filteredMySurveys = mockMySurveys.filter((survey) =>
-    survey.title.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
+  const handleDelete = async (id: number) => {
+    if (!confirm('Are you sure you want to delete this survey?')) return;
+
+    try {
+      await surveysApi.delete(id);
+      setSurveys(surveys.filter(s => s.id !== id));
+      addToast('Survey deleted successfully', 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete survey';
+      addToast(message, 'error');
+    }
+  };
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <Navigation />
-
-      <main className="flex-1 py-8">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-foreground mb-2">Dashboard</h1>
-            <p className="text-muted-foreground">
-              Welcome back! Manage your surveys and discover new ones to participate in.
-            </p>
+    <div className="min-h-screen bg-gray-50">
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+      
+      {/* Header */}
+      <header className="bg-white shadow">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-gray-900">Survey Dashboard</h1>
+          <div className="flex items-center gap-4">
+            <span className="text-gray-600">Welcome, {user?.name || 'User'}</span>
+            <button
+              onClick={logout}
+              className="text-gray-600 hover:text-gray-900"
+            >
+              Logout
+            </button>
           </div>
-
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Available Surveys</CardTitle>
-                <FileText className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{mockSurveys.length}</div>
-                <p className="text-xs text-muted-foreground">Ready to take</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">My Surveys</CardTitle>
-                <BarChart3 className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{mockMySurveys.length}</div>
-                <p className="text-xs text-muted-foreground">Created by you</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Responses</CardTitle>
-                <Users className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">90</div>
-                <p className="text-xs text-muted-foreground">Across your surveys</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Completed</CardTitle>
-                <FileText className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">12</div>
-                <p className="text-xs text-muted-foreground">Surveys taken</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Search and Create */}
-          <div className="flex flex-col sm:flex-row gap-4 mb-8">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-              <Input
-                placeholder="Search surveys by title or creator..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            <Button className="sm:w-auto">
-              <Plus className="h-4 w-4 mr-2" />
-              <Link href="/surveys/create">Create New Survey</Link>
-            </Button>
-          </div>
-
-          {/* Survey Tabs */}
-          <Tabs defaultValue="available" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="available">Available Surveys</TabsTrigger>
-              <TabsTrigger value="my-surveys">My Surveys</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="available" className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold">Available Surveys</h2>
-                <p className="text-sm text-muted-foreground">
-                  {filteredSurveys.length} survey{filteredSurveys.length !== 1 ? "s" : ""} found
-                </p>
-              </div>
-
-              {filteredSurveys.length === 0 ? (
-                <Card>
-                  <CardContent className="flex flex-col items-center justify-center py-12">
-                    <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-                    <h3 className="text-lg font-semibold mb-2">No surveys found</h3>
-                    <p className="text-muted-foreground text-center">
-                      {searchTerm
-                        ? "Try adjusting your search terms."
-                        : "Check back later for new surveys to participate in."}
-                    </p>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {filteredSurveys.map((survey) => (
-                    <SurveyCard key={survey.id} {...survey} />
-                  ))}
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="my-surveys" className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold">My Surveys</h2>
-                <p className="text-sm text-muted-foreground">
-                  {filteredMySurveys.length} survey{filteredMySurveys.length !== 1 ? "s" : ""} found
-                </p>
-              </div>
-
-              {filteredMySurveys.length === 0 ? (
-                <Card>
-                  <CardContent className="flex flex-col items-center justify-center py-12">
-                    <BarChart3 className="h-12 w-12 text-muted-foreground mb-4" />
-                    <h3 className="text-lg font-semibold mb-2">No surveys created yet</h3>
-                    <p className="text-muted-foreground text-center mb-4">
-                      Create your first survey to start collecting responses.
-                    </p>
-                    <Button>
-                      <Plus className="h-4 w-4 mr-2" />
-                      <Link href="/surveys/create">Create Survey</Link>
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {filteredMySurveys.map((survey) => (
-                    <SurveyCard key={survey.id} {...survey} />
-                  ))}
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
         </div>
-      </main>
+      </header>
 
-      <Footer />
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-semibold text-gray-900">Your Surveys</h2>
+          <Link
+            href="/surveys/create"
+            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
+          >
+            Create New Survey
+          </Link>
+        </div>
+
+        {isLoading ? (
+          <div className="flex justify-center items-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
+        ) : surveys.length === 0 ? (
+          <div className="text-center py-12 bg-white rounded-lg shadow">
+            <p className="text-gray-500 mb-4">No surveys yet. Create your first survey!</p>
+            <Link
+              href="/surveys/create"
+              className="text-blue-600 hover:text-blue-700 font-medium"
+            >
+              Create Survey →
+            </Link>
+          </div>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {surveys.map((survey) => (
+              <div
+                key={survey.id}
+                className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow"
+              >
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  {survey.title}
+                </h3>
+                <p className="text-gray-600 text-sm mb-4 line-clamp-2">
+                  {survey.description || 'No description'}
+                </p>
+                <div className="flex items-center justify-between text-sm text-gray-500 mb-4">
+                  <span>
+                    Created: {new Date(survey.created_at).toLocaleDateString()}
+                  </span>
+                  <span>{survey.response_count || 0} responses</span>
+                </div>
+                <div className="flex gap-2">
+                  <Link
+                    href={`/surveys/${survey.id}/take`}
+                    className="flex-1 text-center bg-green-100 text-green-700 px-3 py-2 rounded-md hover:bg-green-200 transition-colors text-sm"
+                  >
+                    Take
+                  </Link>
+                  <Link
+                    href={`/surveys/${survey.id}/results`}
+                    className="flex-1 text-center bg-blue-100 text-blue-700 px-3 py-2 rounded-md hover:bg-blue-200 transition-colors text-sm"
+                  >
+                    Results
+                  </Link>
+                  <button
+                    onClick={() => handleDelete(survey.id)}
+                    className="flex-1 bg-red-100 text-red-700 px-3 py-2 rounded-md hover:bg-red-200 transition-colors text-sm"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
     </div>
-  )
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <ProtectedRoute>
+      <DashboardContent />
+    </ProtectedRoute>
+  );
 }
