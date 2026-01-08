@@ -18,6 +18,13 @@ class SurveyRoute implements Routes {
     this.router.post('', authenticateToken, this.surveyController.createSurvey);
     this.router.put('/:id', authenticateToken, this.surveyController.updateSurveyById);
     this.router.delete('/:id', authenticateToken, this.surveyController.deleteSurveyById);
+    
+    // Questions
+    this.router.post('/:surveyId/questions', authenticateToken, this.surveyController.addQuestions);
+    
+    // Responses
+    this.router.post('/:surveyId/responses', authenticateToken, this.surveyController.submitResponse);
+    this.router.get('/:surveyId/responses', authenticateToken, this.surveyController.getSurveyResponses);
   }
 }
 

@@ -28,7 +28,44 @@ export class SurveyService {
     await survey.destroy();
   }
 
-  public async findSurveyByResponsesId(surveyId: number): Promise<any[]> {
-    return [];
+  public async addQuestionsToSurvey(surveyId: number, questions: any[]): Promise<any[]> {
+    const survey = await SurveyModel.findByPk(surveyId);
+    if (!survey) throw new HTTPException(404, 'Survey not found');
+
+    const questionsArray = Array.isArray(questions) ? questions : [questions];
+    const newQuestions = questionsArray.map((q, i) => ({
+      id: Date.now() + i,
+      ...q,
+      survey_id: surveyId
+    }));
+
+    const existingQuestions = (survey as any).questions || [];
+    const updatedQuestions = [...existingQuestions, ...newQuestions];
+    
+    await survey.update({ questions: updatedQuestions });
+    return newQuestions;
+  }
+
+  public async submitSurveyResponse(responseData: any): Promise<any> {
+    const survey = await SurveyModel.findByPk(responseData.survey_id);
+    if (!survey) throw new HTTPException(404, 'Survey not found');
+
+    const newResponse = {
+      id: Date.now(),
+      ...responseData,
+      submitted_at: new Date()
+    };
+
+    const existingResponses = (survey as any).responses || [];
+    await survey.update({ responses: [...existingResponses, newResponse] });
+    
+    return newResponse;
+  }
+
+  public async findSurveyResponses(surveyId: number): Promise<any[]> {
+    const survey = await SurveyModel.findByPk(surveyId);
+    if (!survey) throw new HTTPException(404, 'Survey not found');
+    
+    return (survey as any).responses || [];
   }
 }
